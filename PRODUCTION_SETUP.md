@@ -92,10 +92,11 @@ Open `upload_test.html` in your browser and test file uploads.
 - [x] Graph knowledge extraction
 
 ### 5. **Error Handling** 🛡️
-- [x] Retry mechanisms
-- [x] Dead letter queues
-- [x] Graceful degradation
-- [x] Circuit breakers
+- [x] Dead letter queues for failed task recovery
+- [x] Graceful degradation with service-level management
+- [x] Circuit breakers for automatic service protection
+- [x] Comprehensive error handling API endpoints
+- [x] Real-time monitoring and alerting capabilities
 
 ## Security Features Implemented ✅
 
@@ -139,3 +140,60 @@ RATE_LIMIT_BURST=10
 - `GET /files/security/config`: View current security settings
 - Enhanced upload responses with validation details
 - Detailed error messages for validation failures
+
+## Comprehensive Error Handling System ✅
+
+### ⚡ **Circuit Breaker Pattern**
+- **Redis-backed state management**: Persistent circuit breaker states across worker restarts
+- **Configurable thresholds**: Failure threshold, recovery timeout, success threshold
+- **Automatic state transitions**: Closed → Open → Half-Open → Closed
+- **Service protection**: Prevents cascading failures across service dependencies
+
+### 🎚️ **Graceful Degradation**
+- **Service level management**: Full → Degraded → Basic → Maintenance modes
+- **Automatic fallback handlers**: Seamless fallback to simpler processing when services fail
+- **Feature availability tracking**: Dynamic feature flags based on real-time service health
+- **User experience preservation**: System remains functional even during partial outages
+
+### 💀 **Dead Letter Queue (DLQ)**
+- **Failed task persistence**: Comprehensive storage of failed tasks with error details and context
+- **Manual retry capabilities**: API endpoints for reviewing and retrying failed tasks
+- **Bulk operations**: Retry multiple tasks simultaneously with status tracking
+- **Automatic cleanup**: Configurable retention periods for failed task history
+
+### 📊 **Error Handling API Endpoints**
+- **Real-time monitoring**: Live service health and circuit breaker status
+- **Failed task management**: View, retry, and delete failed tasks through REST API
+- **Circuit breaker control**: Manual reset and detailed status monitoring
+- **System analytics**: Comprehensive error statistics and failure pattern analysis
+
+### 🔧 **Usage Examples**
+
+#### Monitor System Health
+```bash
+# Get overall system health
+curl http://localhost:8000/error-handling/health
+
+# Check specific circuit breaker
+curl http://localhost:8000/error-handling/circuit-breakers/neo4j
+```
+
+#### Manage Failed Tasks
+```bash
+# View failed tasks
+curl http://localhost:8000/error-handling/failed-tasks
+
+# Retry specific tasks
+curl -X POST http://localhost:8000/error-handling/retry-tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task_ids": ["task-1", "task-2"]}'
+```
+
+#### Service Level Awareness
+```bash
+# Check current service level
+curl http://localhost:8000/error-handling/service-level
+
+# Get available features
+curl http://localhost:8000/error-handling/health | jq '.available_features'
+```
