@@ -1,0 +1,137 @@
+name: custom-graphRAG
+
+services:
+  graphrag:
+    build:
+      context: ..  # Set context to parent directory
+      dockerfile: Docker/service.Dockerfile
+      target: production  # Use production stage by default
+    ports:
+      - "8888:8000"
+    env_file:
+      - ../.env
+    networks:
+      - graph_network
+    depends_on:
+      db:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    volumes:
+      - ../history:/app/history  # History db location
+      - ../uploads:/app/uploads  # File uploads directory
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+
+  worker:
+    build:
+      context: ..  # Set context to parent directory
+      dockerfile: Docker/worker.Dockerfile
+      target: production
+    env_file:
+      - ../.env
+    depends_on:
+      broker:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - graph_network
+    volumes:
+      - ../temp_processing:/app/temp_processing  # Volume for temporary file processing
+      - ../uploads:/app/uploads  # File uploads directory (shared with main app)
+    healthcheck:
+      test: ["CMD", "celery", "-A", "src.app.celery.worker:app", "inspect", "ping", "--timeout=10"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 20s
+    environment:
+      - CELERY_WORKERS=${CELERY_WORKERS:-4}
+      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-2}
+      - CELERY_PREFETCH_MULTIPLIER=${CELERY_PREFETCH_MULTIPLIER:-1}
+      - CELERY_MAX_TASKS_PER_CHILD=${CELERY_MAX_TASKS_PER_CHILD:-1000}
+
+  broker:
+    image: ghcr.io/dragonflydb/dragonfly
+    restart: unless-stopped
+    networks:
+      - graph_network
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db:
+    image: ankane/pgvector:latest
+    restart: unless-stopped
+    shm_size: "256mb"
+    networks:
+      - graph_network
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "postgres", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - postgres_db:/var/lib/postgresql/data
+    ports:
+      - "8432:5432"
+
+  neo4j:
+    image: neo4j:latest
+    restart: unless-stopped
+    networks:
+      - graph_network
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    ports:
+      - "8474:7474" # HTTP
+      - "8687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/mem0graph
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_memory_heap_initial__size=512M
+      - NEO4J_dbms_memory_heap_max__size=1G
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  postgres_db:
+
+networks:
+  graph_network:
+    driver: bridge

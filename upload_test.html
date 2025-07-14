@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload with Progress</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .upload-container {
+            border: 2px dashed #ccc;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .upload-container.dragover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        
+        .progress-container {
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: #007bff;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        
+        .upload-item {
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        
+        .upload-item.processing {
+            border-color: #ffc107;
+            background-color: #fff3cd;
+        }
+        
+        .upload-item.complete {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        
+        .upload-item.failed {
+            border-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        
+        .status-message {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+        
+        .connected {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .disconnected {
+            background-color: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>File Upload System</h1>
+    
+    <div id="connectionStatus" class="connection-status disconnected">
+        Disconnected
+    </div>
+    
+    <div class="upload-container" id="uploadContainer">
+        <p>Drag and drop files here or click to select</p>
+        <button onclick="document.getElementById('fileInput').click()">
+            Select Files
+        </button>
+        <input type="file" id="fileInput" multiple accept=".pdf,.jpg,.jpeg,.png,.txt">
+    </div>
+    
+    <div id="uploadsList"></div>
+    
+    <script>
+        const API_BASE = 'http://localhost:8888';
+        const WS_URL = 'ws://localhost:8888/files/ws';
+        
+        let websocket = null;
+        let uploads = {};
+        
+        // Initialize WebSocket connection
+        function connectWebSocket() {
+            websocket = new WebSocket(WS_URL);
+            
+            websocket.onopen = function() {
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                document.getElementById('connectionStatus').className = 'connection-status connected';
+                console.log('WebSocket connected');
+            };
+            
+            websocket.onclose = function() {
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                document.getElementById('connectionStatus').className = 'connection-status disconnected';
+                console.log('WebSocket disconnected, attempting to reconnect...');
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            websocket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Progress update:', data);
+                    updateUploadProgress(data.id, data.progress, data.message || '');
+                } catch (e) {
+                    console.error('Error parsing WebSocket message:', e);
+                }
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        // File upload handling
+        const fileInput = document.getElementById('fileInput');
+        const uploadContainer = document.getElementById('uploadContainer');
+        const uploadsList = document.getElementById('uploadsList');
+        
+        fileInput.addEventListener('change', handleFiles);
+        
+        // Drag and drop handling
+        uploadContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadContainer.classList.add('dragover');
+        });
+        
+        uploadContainer.addEventListener('dragleave', () => {
+            uploadContainer.classList.remove('dragover');
+        });
+        
+        uploadContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadContainer.classList.remove('dragover');
+            handleFiles({ target: { files: e.dataTransfer.files } });
+        });
+        
+        function handleFiles(event) {
+            const files = Array.from(event.target.files);
+            files.forEach(uploadFile);
+        }
+        
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('metadata', JSON.stringify({ originalName: file.name }));
+            
+            try {
+                const response = await fetch(`${API_BASE}/files/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Upload failed: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                console.log('Upload started:', result);
+                
+                // Create upload item in UI
+                createUploadItem(result.id, result.filename, result.status);
+                uploads[result.id] = result;
+                
+            } catch (error) {
+                console.error('Upload error:', error);
+                alert(`Failed to upload ${file.name}: ${error.message}`);
+            }
+        }
+        
+        function createUploadItem(id, filename, status) {
+            const item = document.createElement('div');
+            item.className = `upload-item ${status}`;
+            item.id = `upload-${id}`;
+            
+            item.innerHTML = `
+                <div><strong>${filename}</strong> (ID: ${id})</div>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-${id}"></div>
+                    </div>
+                </div>
+                <div class="status-message" id="status-${id}">Status: ${status}</div>
+            `;
+            
+            uploadsList.appendChild(item);
+        }
+        
+        function updateUploadProgress(id, progress, message) {
+            const item = document.getElementById(`upload-${id}`);
+            const progressFill = document.getElementById(`progress-${id}`);
+            const statusElement = document.getElementById(`status-${id}`);
+            
+            if (!item || !progressFill || !statusElement) {
+                console.warn(`Upload item ${id} not found in UI`);
+                return;
+            }
+            
+            // Update progress bar
+            if (progress >= 0) {
+                progressFill.style.width = `${progress}%`;
+            }
+            
+            // Update status message
+            statusElement.textContent = message || `Progress: ${progress}%`;
+            
+            // Update item class based on progress
+            item.className = 'upload-item';
+            if (progress === 100) {
+                item.classList.add('complete');
+                statusElement.textContent = 'Complete: ' + message;
+            } else if (progress === -1) {
+                item.classList.add('failed');
+                statusElement.textContent = 'Failed: ' + message;
+            } else if (progress > 0) {
+                item.classList.add('processing');
+            }
+        }
+        
+        // Initialize WebSocket connection when page loads
+        connectWebSocket();
+        
+        // Clear file input after selection
+        fileInput.addEventListener('change', () => {
+            setTimeout(() => fileInput.value = '', 100);
+        });
+    </script>
+</body>
+</html>
