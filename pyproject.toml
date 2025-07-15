@@ -24,4 +24,6 @@ dependencies = [
     "llama-index>=0.12.47",
     "llama-index-node-parser-slide>=0.1.0",
     "python-magic>=0.4.27",
+    "mcp[cli]>=1.11.0",
+    "llama-index-extractors-entity>=0.3.1",
 ]

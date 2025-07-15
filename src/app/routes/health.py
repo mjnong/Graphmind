@@ -1,8 +1,8 @@
 import logging
-from typing import Annotated
+
+from fastapi import HTTPException
 from fastapi.routing import APIRouter
-from fastapi import File, UploadFile, HTTPException, Form
-from fastapi import Depends
+
 from src.app.health import get_dependency_tracker
 
 logger = logging.getLogger("graphrag.health")

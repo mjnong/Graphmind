@@ -111,12 +111,31 @@ async def process_document(file_path: str, upload_id: int):
     notify_progress(upload_id, 20, "Extracting text from PDF...")
     
     try:
+        # Get file metadata from database
+        from src.app.db.crud.files import get_upload
+        from src.app.db.session import SessionLocal
+        
+        db = SessionLocal()
+        try:
+            upload_record = get_upload(db, upload_id)
+            file_metadata = {
+                "upload_id": upload_id,
+                "filename": upload_record.filename if upload_record else "unknown",
+                "object_key": upload_record.object_key if upload_record else file_path,
+                "mime_type": upload_record.mime_type if upload_record else "application/pdf",
+                "file_path": file_path,
+                "created_at": upload_record.created_at.isoformat() if upload_record and upload_record.created_at else None
+            }
+            logger.info(f"Retrieved file metadata: {file_metadata}")
+        finally:
+            db.close()
+        
         # Build knowledge graph
         driver = get_neo4j_driver()
         logger.info("Starting knowledge graph construction...")
         
         notify_progress(upload_id, 40, "Building knowledge graph...")
-        res = await driver.build_kg_from_pdf(file_path)
+        res = await driver.build_kg_from_pdf(file_path, upload_id=upload_id, file_metadata=file_metadata)
         logger.info(f"Knowledge graph construction completed. Result: {res}")
         
         notify_progress(upload_id, 80, "Verifying graph structure...")

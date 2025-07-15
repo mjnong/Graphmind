@@ -272,18 +272,36 @@ async def list_uploads(skip: int = 0, limit: int = 100):
 @router.delete("/upload/{upload_id}")
 async def delete_upload(upload_id: int):
     """
-    Delete an upload by ID.
+    Delete an upload by ID and clean up associated graph data.
     """
     try:
         file_service = get_file_service()
+        neo4j_driver = get_neo4j_driver()
         
         # Get the upload record to retrieve the object_key before deletion
         upload = file_service.get_upload_by_id(upload_id)
         if not upload:
             raise HTTPException(status_code=404, detail="Upload not found")
         
+        # Initialize deletion stats
+        deletion_stats = {"error": "Graph cleanup not attempted"}
+        
+        # Delete from Neo4j graph first
+        try:
+            deletion_stats = await neo4j_driver.delete_file_from_graph(upload_id)
+            logger.info(f"Deleted graph data for upload {upload_id}: {deletion_stats}")
+        except Exception as e:
+            logger.warning(f"Error deleting graph data for upload {upload_id}: {e}")
+            deletion_stats = {"error": str(e)}
+            # Continue with file deletion even if graph cleanup fails
+        
         # Delete from storage using the object_key
-        get_store().delete(upload.object_key)
+        storage_cleanup = "success"
+        try:
+            get_store().delete(upload.object_key)
+        except Exception as e:
+            logger.warning(f"Error deleting file from storage: {e}")
+            storage_cleanup = f"error: {str(e)}"
         
         # Delete from database
         success = file_service.delete_upload(upload_id)
@@ -291,7 +309,12 @@ async def delete_upload(upload_id: int):
         if not success:
             raise HTTPException(status_code=404, detail="Upload not found")
         
-        return {"message": "Upload deleted successfully"}
+        return {
+            "message": "Upload deleted successfully",
+            "upload_id": upload_id,
+            "graph_cleanup": deletion_stats,
+            "storage_cleanup": storage_cleanup
+        }
     except Exception as e:
         logger.error(f"Error deleting upload: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete upload: {str(e)}")
@@ -330,23 +353,6 @@ async def query_graph(query_text: str = Form(...)):
         logger.error(f"Error querying graph: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to query graph: {str(e)}")
 
-@router.get("/graph/test-retrieval")
-async def test_retrieval_query():
-    """
-    Test the retrieval query against the actual Neo4j schema to debug issues.
-    This helps understand what properties and relationships actually exist.
-    """
-    try:
-        driver = get_neo4j_driver()
-        test_results = driver.test_retrieval_query()
-        return {
-            "test_results": test_results,
-            "message": "Retrieval query test completed"
-        }
-    except Exception as e:
-        logger.error(f"Error testing retrieval query: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to test retrieval query: {str(e)}")
-
 @router.post("/graph/retrieve")
 async def retrieve_context(
     query_text: str = Form(...), 
@@ -354,7 +360,7 @@ async def retrieve_context(
 ):
     """
     Directly retrieve context from the knowledge graph without LLM generation.
-    Returns raw retrieved chunks/context that you can feed to your own agent or streaming LLM.
+    Returns structured data perfect for feeding to your own agent or streaming LLM.
     """
     try:
         driver = get_neo4j_driver()
@@ -461,3 +467,100 @@ async def get_security_config():
     except Exception as e:
         logger.error(f"Error getting security config: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get security config: {str(e)}")
+
+
+@router.get("/graph/file-summary/{upload_id}")
+async def get_file_graph_summary(upload_id: int):
+    """
+    Get a summary of graph data for a specific file upload.
+    Useful for understanding what's in the graph before deletion.
+    """
+    try:
+        driver = get_neo4j_driver()
+        summary = driver.get_file_graph_summary(upload_id)
+        return {
+            "upload_id": upload_id,
+            "summary": summary,
+            "message": "File graph summary retrieved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error getting file graph summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get file graph summary: {str(e)}")
+
+@router.get("/graph/orphaned-nodes")
+async def check_orphaned_nodes():
+    """
+    Check for orphaned graph nodes that have upload_id but no corresponding database record.
+    Useful for maintenance and cleanup.
+    """
+    try:
+        driver = get_neo4j_driver()
+        cleanup_stats = driver.cleanup_orphaned_nodes()
+        return {
+            "cleanup_stats": cleanup_stats,
+            "message": "Orphaned nodes check completed"
+        }
+    except Exception as e:
+        logger.error(f"Error checking orphaned nodes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check orphaned nodes: {str(e)}")
+
+@router.get("/graph/stats")
+async def get_graph_statistics():
+    """
+    Get comprehensive statistics about the current graph state.
+    """
+    try:
+        driver = get_neo4j_driver()
+        stats = driver.get_graph_stats()
+        return {
+            "statistics": stats,
+            "message": "Graph statistics retrieved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error getting graph statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get graph statistics: {str(e)}")
+
+@router.post("/graph/context-for-llm")
+async def get_context_for_llm(
+    query_text: str = Form(...),
+    top_k: int = Form(5, description="Number of top results to retrieve"),
+    format_type: str = Form("combined", description="Format type: 'combined' for text, 'prompt' for full prompt, 'structured' for detailed data")
+):
+    """
+    Get context formatted specifically for feeding into LLM agents or streaming APIs.
+    Different format options for different use cases.
+    """
+    try:
+        driver = get_neo4j_driver()
+        
+        if format_type == "combined":
+            # Just the combined context text
+            context = driver.get_context_for_query(query_text, top_k=top_k)
+            return {
+                "query": query_text,
+                "context": context,
+                "format": "combined_text",
+                "message": "Context text retrieved successfully"
+            }
+        elif format_type == "prompt":
+            # Full prompt ready for LLM
+            prompt = driver.get_llm_ready_prompt(query_text, top_k=top_k)
+            return {
+                "query": query_text,
+                "prompt": prompt,
+                "format": "llm_ready_prompt",
+                "message": "LLM prompt retrieved successfully"
+            }
+        else:
+            # Full structured data
+            result = driver.retrieve_context(query_text, top_k=top_k)
+            return {
+                "query": query_text,
+                "structured_result": result,
+                "format": "structured_data",
+                "message": "Structured context retrieved successfully"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting context for LLM: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get context for LLM: {str(e)}")
