@@ -781,7 +781,7 @@ class Neo4jDriver:
 
         try:
             result = self._graphrag.search(
-                query_text=query, retriever_config={"top_k": 5}, return_context=True
+                query_text=query, retriever_config={"top_k": 3}
             )
 
             logger.info(f"Query completed. Result type: {type(result)}")

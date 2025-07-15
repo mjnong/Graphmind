@@ -147,6 +147,11 @@ dev-local: start-services ## 🏠 Development with local API (services in Docker
 	@echo "$(INFO) Then start your local API server with uvicorn or your IDE"
 	@echo "$(INFO) Database available at: $(GREEN)localhost:8432$(NC)"
 
+mcp-inspect: ## 🔍 Run MCP inspector for debugging
+	@echo "$(INFO) Starting MCP inspector..."
+	@echo "$(WARNING) Make sure the service is running first with 'make start'"
+	@npx @modelcontextprotocol/inspector
+	
 # ==========================================
 # CORE DOCKER OPERATIONS
 # ==========================================
@@ -476,6 +481,6 @@ _wait_for_infrastructure:
 .PHONY: help status setup dev build start stop restart logs logs-api logs-worker logs-db \
         db-shell migrate migrate-create migrate-history migrate-current migrate-rollback db-reset \
         test-upload worker-status worker-restart worker-shell file-stats \
-        health debug monitor clean clean-all backup-db restore-db \
+        health debug monitor clean clean-all backup-db restore-db mcp-inspect \
         env-setup start-services dev-full dev-local \
         _check_services _check_api_health _check_database_health _check_worker_health _check_storage_health _check_uploads _wait_for_services _wait_for_infrastructure

@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 import logging
 import signal
 import sys
@@ -9,6 +9,7 @@ from src.app.routes import health, files, error_handling
 import uvicorn
 import asyncio
 from src.app.configs.config import get_config
+from src.app.mcp import toolbox
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,13 @@ async def lifespan(app: FastAPI):
     # Upload directory already created during app initialization
     logger.info(f"Upload directory confirmed ready: {get_config().local_path}")
     
-    yield
+    async with AsyncExitStack() as stack:
+        # Register the toolbox app with the main FastAPI app
+        await stack.enter_async_context(toolbox.mcp.session_manager.run())
+
+        # Yield control to the FastAPI app
+        yield
+    
     # Cleanup actions can be added here if needed
 
 app = FastAPI(
@@ -75,6 +82,8 @@ app.mount("/static", staticfiles.StaticFiles(directory=get_config().local_path),
 app.include_router(health.router)
 app.include_router(files.router)
 app.include_router(error_handling.router)  # Include the error handling router
+
+app.mount("/graphmind", toolbox.mcp.streamable_http_app())
 
 async def main():
     """
